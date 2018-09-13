@@ -25,7 +25,7 @@ class Database
     }
     private static function create_database_connection() {
         $connection_string = implode ( " ", array (
-            "host=" . '10.18.20.230:5432',
+            "host=" . '10.18.20.230',
             "dbname=" . 'eol_temp_db_ver1',
             "user=" . 'postgres',
             "password=" . 'postgres'
