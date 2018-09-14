@@ -13,11 +13,17 @@ function getData($url)
     return $result;
 }
 
-
-
 $CHUNK_SIZE = 25;
-// $data = array();
 $db = new Database();
+
+if ($argc > 1) {
+    if (defined('STDIN')) {
+        $providerID = $argv[1];
+    }
+} else {
+    print("Enter <providerID> as 1st arguement");
+    exit();
+}
 
 /* COUNT NO OF DISTINCT PAGES IN THE TABLE */
 // $db_conn = $db->get_connection();
@@ -26,52 +32,48 @@ $db = new Database();
 // print_r(pg_fetch_array($result));
 // $db->close_database();
 
-
-
 /* FETCH ALL DISTINCT PAGES IN THE TABLE */
 $db_conn = $db->get_connection();
-$qry = 'SELECT DISTINCT(page_id) FROM pages ORDER BY page_id;';
+$qry = 'SELECT DISTINCT(page_id) FROM pages WHERE provider_id = ' . $providerID . ' ORDER BY page_id;';
 $result = pg_query($db_conn, $qry);
 $results = pg_fetch_all($result);
-
-if (pg_num_rows($result) > 0) {     
+$num_rows = pg_num_rows($result);
+echo "Total ". $num_rows. " records found for provider id : ". $providerID;
+if ($num_rows > 0) {
+    $chunk_count = 0;
     $chunks = array_chunk($results, $CHUNK_SIZE, true);
-    foreach ($chunks as $chunk){
+    foreach ($chunks as $chunk) {
         $page_ids_comma_separated = '';
-        foreach($chunk as $item){
+        foreach ($chunk as $item) {
             $page_id = $item['page_id'];
-            $page_ids_comma_separated .= $page_id . ",";            
-//             break;
+            $page_ids_comma_separated .= $page_id . ",";
+            // break;
         }
-        $page_ids_comma_separated = substr($page_ids_comma_separated, 0, -1);
+        $page_ids_comma_separated = substr($page_ids_comma_separated, 0, - 1);
 
+        $chunk_count ++;
         /* CRAWL BATCH-WISE */
-        $url = 'http://eol.org/api/pages/1.0.json?batch=true&id='.$page_ids_comma_separated.'&images_per_page=1&images_page=1&videos_per_page=1&videos_page=1&sounds_per_page=1&sounds_page=1&maps_per_page=1&maps_page=1&texts_per_page=2&texts_page=1&subjects=overview&licenses=all&details=true&common_names=true&synonyms=true&references=true&taxonomy=true&vetted=0&cache_ttl=&language=en';
+        $url = 'http://eol.org/api/pages/1.0.json?batch=true&id=' . $page_ids_comma_separated . '&images_per_page=1&images_page=1&videos_per_page=1&videos_page=1&sounds_per_page=1&sounds_page=1&maps_per_page=1&maps_page=1&texts_per_page=2&texts_page=1&subjects=overview&licenses=all&details=true&common_names=true&synonyms=true&references=true&taxonomy=true&vetted=0&cache_ttl=&language=en';
         $pages_json = getData($url);
-//         array_push($data, json_decode($pages_json, true));
-        
-        if (file_put_contents(__DIR__ . 'data/pages/pages.json', $pages_json . "\r\n", FILE_APPEND)) {
-            echo "\nData saving for page-ids : ". $page_ids_comma_separated;
-        } else {
-            echo "\nError saving for page-ids : ". $page_ids_comma_separated;
-        }
-            
-        
-        
-        
-//         break;
-            
-    }
-        
-//     print_r(json_encode($data));
-            
 
-    
-} else  {
-    echo ("No result found in the table\n");
+        $SAVE_DIR = __DIR__ . '/data/pages/providerid_' . $providerID;
+        if (!file_exists($SAVE_DIR)) {
+            mkdir($SAVE_DIR, 0777, true);
+        }
+        
+        if (file_put_contents($SAVE_DIR . '/chunk' . $chunk_count . '.json', $pages_json . "\r\n", FILE_APPEND)) {
+            echo "\nData saved for provider-id : " . $providerID . " and chunk no : " . $chunk_count;
+        } else {
+            echo "\nError saving for for provider-id : " . $providerID . " and chunk no : " . $chunk_count;
+        }
+
+
+        // break;
+    }
+} else {
+    echo ("No result found in the table for provider id : ". $providerID."\n");
 }
 $db->close_database();
-
 
 // print_r(json_encode($data));
 ?>
