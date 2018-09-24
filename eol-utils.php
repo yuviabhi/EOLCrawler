@@ -43,12 +43,14 @@ function sanitize($data){
 			
 			// replaces \" from the array
 			$new_data = array();
-			foreach ($data as $d) {
+			foreach ($data as $k=>$d) {
 				if(is_array($d)){
-					array_push($new_data, sanitize($d));
+					$new_data += array($k => sanitize($d));
+					//array_push($new_data, sanitize($d));
 				} else {
 					$d = preg_replace("/\"/","'",$d); // escape double quote
-					array_push($new_data, $d); 
+					$new_data += array($k => sanitize($d));
+					//array_push($new_data, $d); 
 				}
 			}
 			$data = $new_data;
