@@ -43,7 +43,7 @@ try {
 		print_r("Total ID : ".pg_num_rows($result).PHP_EOL);
 		if($write_into_file==TRUE){
 		// write into file
-		write2file($result, array('page_id'), "data/statistics/".$providerID."_pages_all_check.csv");
+		write2file($result, array('page_id'), "data/statistics/".$providerID."_pages_all.csv");
 		}
 	}
 
@@ -66,7 +66,7 @@ try {
 		print_r("PAGES WITH DATAOBJS : ".pg_num_rows($result).PHP_EOL);
 		if($write_into_file==TRUE){
 		// write into file
-		write2file($result, array('page_id'), "data/statistics/".$providerID."_pages_with_dataobjs_check.csv");
+		write2file($result, array('page_id'), "data/statistics/".$providerID."_pages_with_dataobjs.csv");
 		}
 	}
 
@@ -96,7 +96,7 @@ try {
 		print_r("PAGES WITH NO DETAILS : ".pg_num_rows($result).PHP_EOL);
 		if($write_into_file==TRUE){
 		// write into file
-		write2file($result, array('page_id'), "data/statistics/".$providerID."_pages_with_no_details_check.csv");
+		write2file($result, array('page_id'), "data/statistics/".$providerID."_pages_with_no_details.csv");
 		}
 	}
 
@@ -124,7 +124,7 @@ try {
 		print_r("PAGE ID AND DATAOBJ COUNTS : ".pg_num_rows($result).PHP_EOL);
 		if($write_into_file==TRUE){
 		// write into file
-		write2file($result, array('page_id', 'dataobj_count'), "data/statistics/".$providerID."_dataob_counts_check.csv");
+		write2file($result, array('page_id', 'dataobj_count'), "data/statistics/".$providerID."_dataob_counts.csv");
 		}
 	}
 
