@@ -68,6 +68,9 @@ foreach ($FILENAMES as $FILENAME) {
         */
         
         $query_params = array();
+        if(isset($providerID)){
+			$query_params["provider_id"] = $providerID;
+		}
         if(isset($page_id)){
 			$query_params["page_id"] = $page_id;
 		}
@@ -116,6 +119,9 @@ foreach ($FILENAMES as $FILENAME) {
 			$query_params = array();
 			if(isset($page_id)){
 				$query_params["page_id"] = $page_id;
+			}
+			if(isset($providerID)){
+				$query_params["provider_id"] = $providerID;
 			}
 			$unknown = array();
 			foreach ($obj as $key => $value){
