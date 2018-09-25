@@ -17,11 +17,13 @@ function getData($url)
 
 $url_providers = 'http://eol.org/api/provider_hierarchies/1.0.json';
 $providers = json_decode(getData($url_providers));
-
+if(!empty($providers)){
+    file_put_contents("eol_providers.json", json_encode($providers));
+}
 foreach ($providers as $p) {
     $id = $p->id;
     $label = $p->label;
-    print_r($id. "\r\n");
+    print_r($id. "\r". $label."\r\n");
 
 }
 
