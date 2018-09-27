@@ -52,20 +52,27 @@ if ($num_rows > 0) {
         $page_ids_comma_separated = substr($page_ids_comma_separated, 0, - 1);
 
         $chunk_count ++;
-        /* CRAWL BATCH-WISE */
-        $url = 'http://eol.org/api/pages/1.0.json?batch=true&id=' . $page_ids_comma_separated . '&images_per_page=1&images_page=1&videos_per_page=1&videos_page=1&sounds_per_page=1&sounds_page=1&maps_per_page=1&maps_page=1&texts_per_page=2&texts_page=1&subjects=overview&licenses=all&details=true&common_names=true&synonyms=true&references=true&taxonomy=true&vetted=0&cache_ttl=&language=en';
-        $pages_json = getData($url);
-
+        
         $SAVE_DIR = __DIR__ . '/data/pages/providerid_' . $providerID;
         if (!file_exists($SAVE_DIR)) {
             mkdir($SAVE_DIR, 0777, true);
         }
+        if(!file_exists($SAVE_DIR . '/chunk' . $chunk_count . '.json')){
         
-        if (file_put_contents($SAVE_DIR . '/chunk' . $chunk_count . '.json', $pages_json . "\r\n", FILE_APPEND)) {
-            echo "\nData saved for provider-id : " . $providerID . " and chunk no : " . $chunk_count;
-        } else {
-            echo "\nError saving for for provider-id : " . $providerID . " and chunk no : " . $chunk_count;
+        	/* CRAWL BATCH-WISE */
+		    $url = 'http://eol.org/api/pages/1.0.json?batch=true&id=' . $page_ids_comma_separated . '&images_per_page=1&images_page=1&videos_per_page=1&videos_page=1&sounds_per_page=1&sounds_page=1&maps_per_page=1&maps_page=1&texts_per_page=2&texts_page=1&subjects=overview&licenses=all&details=true&common_names=true&synonyms=true&references=true&taxonomy=true&vetted=0&cache_ttl=&language=en';
+		    $pages_json = getData($url);
+
+		    
+		    
+		    if (file_put_contents($SAVE_DIR . '/chunk' . $chunk_count . '.json', $pages_json . "\r\n", FILE_APPEND)) {
+		        echo "\nData saved for provider-id : " . $providerID . " and chunk no : " . $chunk_count;
+		    } else {
+		        echo "\nError saving for for provider-id : " . $providerID . " and chunk no : " . $chunk_count;
+		    }
         }
+        
+        
 
 
         // break;
