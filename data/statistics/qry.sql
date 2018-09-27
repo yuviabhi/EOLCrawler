@@ -77,3 +77,18 @@ select *
 from pages_dataobjects 
 where page_id =45518042
 order by provider_id
+
+
+
+-- CHECK WHERE DATAOBJ EXIST AND DATASUBTYPE =='MAP' Only
+(select obj.page_id , count(obj.page_id) as dataobj_count
+from pages_dataobjects obj
+where obj.provider_id = 1280 
+group by obj.page_id
+order by dataobj_count desc, page_id asc)
+INTERSECT
+(select obj.page_id , count(obj.page_id) as map_count
+from pages_dataobjects obj
+where obj.provider_id = 1280 and obj.datasubtype like '%Map%'
+group by obj.page_id
+order by map_count desc, page_id asc)
