@@ -92,3 +92,68 @@ from pages_dataobjects obj
 where obj.provider_id = 1280 and obj.datasubtype like '%Map%'
 group by obj.page_id
 order by map_count desc, page_id asc)
+
+
+
+-- CHECK WHERE DATAOBJ EXIST AND DATASUBTYPE !='MAP'
+(select obj.page_id , count(obj.page_id) as dataobj_count
+from pages_dataobjects obj
+where obj.provider_id = 1280 
+group by obj.page_id
+order by dataobj_count desc, page_id asc)
+EXCEPT
+(select obj.page_id , count(obj.page_id) as map_count
+from pages_dataobjects obj
+where obj.provider_id = 1280 and obj.datasubtype like '%Map%'
+group by obj.page_id
+order by map_count desc, page_id asc)
+
+-- TAXONRANK COUNTS WHERE DATAOBJ EXIST AND DATASUBTYPE !='MAP'
+select (((json_array_elements_text(replace(taxonconcepts,chr(26),' ')::json))::json)->'taxonRank')::text as taxonRank , count(distinct(page_id)) as count_page_id
+from pages_details 
+where provider_id = 1280 and page_id in
+			(select page_id from (
+				(select obj.page_id , count(obj.page_id) as dataobj_count
+				from pages_dataobjects obj
+				where obj.provider_id = 1280 
+				group by obj.page_id
+				order by dataobj_count desc, page_id asc)
+				EXCEPT
+				(select obj.page_id , count(obj.page_id) as map_count
+				from pages_dataobjects obj
+				where obj.provider_id = 1280 and obj.datasubtype like '%Map%'
+				group by obj.page_id
+				order by map_count desc, page_id asc)
+				) as temp
+			)
+group by taxonRank
+order by count_page_id desc, taxonRank
+
+-- TAXONRANK AND PAGE IDS WHERE DATAOBJ EXIST AND DATASUBTYPE !='MAP'
+select * from (
+select distinct(page_id) , ((((json_array_elements_text(replace(taxonconcepts,chr(26),'')::json))::json)->'taxonRank')::text) as  taxonrank
+from pages_details 
+where provider_id = 1280 
+			and page_id in
+			(select page_id from (
+				(select obj.page_id , count(obj.page_id) as dataobj_count
+				from pages_dataobjects obj
+				where obj.provider_id = 1280 
+				group by obj.page_id
+				order by dataobj_count desc, page_id asc)
+				EXCEPT
+				(select obj.page_id , count(obj.page_id) as map_count
+				from pages_dataobjects obj
+				where obj.provider_id = 1280 and obj.datasubtype like '%Map%'
+				group by obj.page_id
+				order by map_count desc, page_id asc)
+				) as temp
+			)
+
+
+) temp 
+-- where taxonrank like "%Species%" 
+order by taxonrank
+
+
+
