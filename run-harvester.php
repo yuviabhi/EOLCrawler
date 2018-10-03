@@ -48,7 +48,7 @@ foreach ($FILENAMES as $FILENAME) {
 		$data_chunk = json_decode($JSON_DATA, true);
 		//print_r($data_chunk);
 	
-		foreach($data_chunk as $key => $value){
+		foreach($data_chunk as $key => $value) {
 		
 		$page_id = sanitize($key);
 		$scientificName = sanitize((isset($value['scientificName']) ? $value['scientificName'] : ''));
