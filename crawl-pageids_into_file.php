@@ -17,7 +17,18 @@ function getData($url)
 
 function crawl_recursively($taxonID, $providerID, $filename) {
     $url_hierarchy_entries = 'http://eol.org/api/hierarchy_entries/1.0/' . $taxonID . '.json';
-    $hierarchy_entries = json_decode(getData($url_hierarchy_entries));
+    
+    $path_save_api_hits = __DIR__ . "/data/hierarchies/".$providerID;
+
+    $filename_api_hits = $path_save_api_hits."/".$taxonID.".json";
+    if(!file_exists($filename_api_hits)){
+    	$hierarchy_entries = json_decode(getData($url_hierarchy_entries));
+    	file_put_contents($filename_api_hits, json_encode($hierarchy_entries));
+    } else {
+		$hierarchy_entries = json_decode(file_get_contents($filename_api_hits));
+		
+    }    
+    
     
     $children = $hierarchy_entries->children;
     if(sizeof($children)==0){
@@ -75,7 +86,19 @@ function crawl_recursively($taxonID, $providerID, $filename) {
     echo $filename.PHP_EOL; //exit(0);
     
     $url_hierarchy = 'http://eol.org/api/hierarchies/1.0/' . $providerID . '.json??&language=en';
-    $hierarchy = json_decode(getData($url_hierarchy));
+    $path_save_api_hits = __DIR__ . "/data/hierarchies/".$providerID;
+    if (!file_exists($path_save_api_hits)) {
+            mkdir($path_save_api_hits, 0777, true);
+        }
+    $filename_api_hits = $path_save_api_hits."/".$providerID.".json";
+    if(!file_exists($filename_api_hits)){
+    	$hierarchy = json_decode(getData($url_hierarchy));
+    	file_put_contents($filename_api_hits, json_encode($hierarchy));
+    } else {
+		$hierarchy = json_decode(file_get_contents($filename_api_hits));    
+    }
+    
+
     
     //print_r($hierarchy->title);
     $roots = $hierarchy->roots;
