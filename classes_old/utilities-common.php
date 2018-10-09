@@ -1,5 +1,4 @@
 <?php
-date_default_timezone_set ( 'UTC' );
 require_once dirname ( __DIR__ ) . '/classes/document.php';
 
 /**
@@ -26,8 +25,8 @@ class Configuration {
 	public static function get_view_name_asset(string $src_id) {
 		return $src_id . "_raw_asset";
 	}
-	public static function get_dspace_configuration() {
-		return self::get_config ()->{"dspace"};
+	public static function get_dspace_export_version() {
+		return self::get_config ()->{"export"}->{"AIPdspaceVersion"};
 	}
 }
 
@@ -39,12 +38,9 @@ class Configuration {
  */
 class StringUtils {
 	public static function convert_to_utf8(string $text) {
-		$text = preg_replace ( '/[\x00-\x08\x10\x0B\x0C\x0E-\x19\x7F]' . '|[\x00-\x7F][\x80-\xBF]+' . '|([\xC0\xC1]|[\xF0-\xFF])[\x80-\xBF]*' . '|[\xC2-\xDF]((?![\x80-\xBF])|[\x80-\xBF]{2,})' . '|[\xE0-\xEF](([\x80-\xBF](?![\x80-\xBF]))|(?![\x80-\xBF]{2})|[\x80-\xBF]{3,})/S', '?', $text );
-		return utf8_encode ( preg_replace_callback ( '/\\\\u([0-9a-fA-F]{4})/', function ($match) {
+		return preg_replace_callback ( '/\\\\u([0-9a-fA-F]{4})/', function ($match) {
 			return mb_convert_encoding ( pack ( 'H*', $match [1] ), 'UTF-8', 'UCS-2BE' );
-		}, $text ) );
-		// return iconv ( mb_detect_encoding ( $text, mb_detect_order (), true ), 'UTF-8//TRANSLIT', $text );
-		// return mb_convert_encoding ( $text, "UTF-8" );
+		}, $text );
 	}
 }
 
@@ -83,7 +79,7 @@ class FileSystemUtils {
 	}
 
 	/**
-	 * Find duplicate files in RECURSIVE mode
+	 * Finds duplicate files in RECURSIVE mode
 	 *
 	 * @param string $dir
 	 * @return array
@@ -93,29 +89,17 @@ class FileSystemUtils {
 	}
 
 	/**
-	 * Find empty directories in RECURSIVE mode
+	 * Finds empty directories in RECURSIVE mode
 	 *
 	 * @param string $dir
 	 * @return array
 	 */
 	public static function _get_empty_directories(string $dir) {
-		"find $dir -type d -empty -print";
 		return array ();
 	}
 
 	/**
-	 * Remove empty directories in RECURSIVE mode
-	 *
-	 * @param string $dir
-	 * @return array
-	 */
-	public static function _remove_empty_directories(string $dir) {
-		"find $dir -type d -empty -delete";
-		return array ();
-	}
-
-	/**
-	 * Find empty files in RECURSIVE mode
+	 * Finds empty files in RECURSIVE mode
 	 *
 	 * @param string $dir
 	 * @return array
@@ -129,21 +113,7 @@ class FileSystemUtils {
 	}
 
 	/**
-	 * Remove all empty files in RECURSIVE mode
-	 *
-	 * @param string $dir
-	 * @return array
-	 */
-	public static function remove_empty_files(string $dir) {
-		$op = array ();
-		if (file_exists ( $dir )) {
-			exec ( "find $dir -size 0 -delete", $op );
-		}
-		return $op;
-	}
-
-	/**
-	 * Find matched files for given name-pattern
+	 * Finds matched files for given name-pattern
 	 *
 	 * @param string $dir
 	 * @param string $pattern
@@ -343,13 +313,9 @@ class HTMLParser {
 				"twitter:description",
 				"twitter:creator",
 				"twitter:image",
-				"fb:admins",
-				"google-site-verification",
-				"apple-itunes-app"
+				"fb:admins"
 		);
-		$exceptions_property = array (
-				"fb:pages"
-		);
+		$exceptions_property = array ();
 
 		$xpath = new DOMXPath ( $dom_document );
 
@@ -363,7 +329,7 @@ class HTMLParser {
 					continue;
 				}
 				$metadata_value = trim ( $attributes->getNamedItem ( "content" )->nodeValue );
-				$document->add_metadata ( "header_meta_" . $metadata_name, $metadata_value );
+				$document->add_metadata ( "header_" . $metadata_name, $metadata_value );
 				$tags_found ++;
 			}
 			if (isset ( $attributes->getNamedItem ( "name" )->nodeValue )) {
@@ -371,10 +337,9 @@ class HTMLParser {
 				if (in_array ( strtolower ( $metadata_name ), $exceptions_name )) {
 					continue;
 				}
-				if (isset ( $attributes->getNamedItem ( "content" )->nodeValue )) {
-					$document->add_metadata ( "header_meta_" . $metadata_name, trim ( $attributes->getNamedItem ( "content" )->nodeValue ) );
-					$tags_found ++;
-				}
+				$metadata_value = trim ( $attributes->getNamedItem ( "content" )->nodeValue );
+				$document->add_metadata ( "header_" . $metadata_name, $metadata_value );
+				$tags_found ++;
 			}
 		}
 
@@ -411,43 +376,6 @@ class HTMLParser {
 			}
 		}
 		return $tags_found;
-	}
-
-	/**
-	 *
-	 * @param DOMElement $table_element
-	 * @param NDLIDocument $document
-	 * @param int $key_position
-	 * @param int $value_position
-	 * @return number
-	 */
-	public static function extract_metadata_from_table(DOMElement $table_element, NDLIDocument $document, int $key_position = 0, int $value_position = 1) {
-		$key_count = 0;
-		$xpath = new DOMXPath ( $table_element->ownerDocument );
-		$tr_elements = $xpath->query ( "./tr", $table_element );
-
-		for($i = 0; $i < $tr_elements->length; $i ++) {
-			$td_elements = $xpath->query ( "./td", $tr_elements->item ( $i ) );
-			if ($td_elements->length >= 2) {
-				if ($td_elements->item ( $key_position ) != null && strlen ( $td_elements->item ( $key_position )->textContent ) > 0) {
-					if ($td_elements->item ( $value_position ) != null && strlen ( $td_elements->item ( $value_position )->textContent ) > 0) {
-						$field = $td_elements->item ( $key_position )->textContent;
-						$value = $td_elements->item ( $value_position )->textContent;
-						$document->add_metadata ( $field, explode ( PHP_EOL, $value ) );
-						$key_count ++;
-					}
-				}
-			}
-		}
-		return $key_count;
-	}
-	/**
-	 *
-	 * @param string $html_string
-	 * @return string
-	 */
-	public static function _remove_html_tags(string $html_string) {
-		return $html_string;
 	}
 }
 
@@ -535,8 +463,8 @@ class DataSource {
 		$db = new Database ();
 		$queries = array (
 				"DELETE FROM items WHERE src_id = '" . $this->src_id . "'",
-				"DROP MATERIALIZED VIEW IF EXISTS public." . Configuration::get_view_name_item ( $this->src_id ),
-				"DROP MATERIALIZED VIEW IF EXISTS public." . Configuration::get_view_name_asset ( $this->src_id )
+				"DROP MATERIALIZED VIEW public." . Configuration::get_view_name_item ( $this->src_id ),
+				"DROP MATERIALIZED VIEW public." . Configuration::get_view_name_asset ( $this->src_id )
 		);
 		$status = pg_query ( $db->get_connection (), implode ( ";", $queries ) );
 		$db->close_database ();
@@ -550,8 +478,10 @@ class DataSource {
 	 * @return boolean
 	 */
 	private function store_document(NDLIDocument $document, $db_conn) {
-		$ndli_uniq_id = $this->src_id . "/" . $document->get_ndli_document_id ();
+		$ndli_uniq_id = $this->src_id . "/" . $document->get_document_id ();
 		$ndli_collection_id = $document->get_collection_id () ? $this->src_id . "/" . $document->get_collection_id () : null;
+
+		// FIXME handle IDS for related items
 
 		pg_flush ( $db_conn );
 		$status = pg_query ( $db_conn, "BEGIN" ) ? true : false;
@@ -561,23 +491,16 @@ class DataSource {
 		if ($status) {
 			$query_items_params = array (
 					"src_id" => $this->src_id,
-					"src_uniq_id" => $document->get_src_document_id (),
+					"src_uniq_id" => $document->get_document_id (),
 					"src_data_hash" => md5 ( json_encode ( $document ) ),
 					"ndli_uniq_id" => $ndli_uniq_id,
 					"ndli_collection_id" => $ndli_collection_id
 			);
-			$status = @pg_insert ( $db_conn, "items", $query_items_params, PGSQL_DML_ESCAPE | PGSQL_DML_EXEC );
-			if (! $status) {
-				echo $ndli_uniq_id . "::items::" . pg_errormessage ( $db_conn ) . PHP_EOL;
-			}
+			$status = pg_insert ( $db_conn, "items", $query_items_params );
 		}
 
 		// INSERT INTO metadata
-		$metadata = $document->get_metadata ();
-		if ($thumbnails = $document->get_thumbnail_url ()) {
-			$metadata ["ndli_document_thumbnail"] = $thumbnails;
-		}
-		foreach ( $metadata as $key => $values ) {
+		foreach ( $document->get_metadata () as $key => $values ) {
 			foreach ( $values as $value ) {
 				if (! $status) {
 					break;
@@ -588,16 +511,19 @@ class DataSource {
 				);
 				if (is_iterable ( $value ) || is_object ( $value )) {
 					$query_metadata_params ["meta_field"] = $key . "_OBJECT";
-					$value = json_encode ( $value, JSON_UNESCAPED_UNICODE );
+					$value = json_encode ( $value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
 				} else {
 					$query_metadata_params ["meta_field"] = $key;
 				}
-				$query_metadata_params ["meta_value"] = StringUtils::convert_to_utf8 ( $value );
-				mb_convert_encoding ( $value, "UTF-8" );
-				$status = @pg_insert ( $db_conn, "metadata_raw", $query_metadata_params, PGSQL_DML_ESCAPE | PGSQL_DML_EXEC );
+				$query_metadata_params ["meta_value"] = mb_convert_encoding ( $value, "UTF-8" );
+				// FIXME
+				// iconv ( mb_detect_encoding ( $value, mb_detect_order (), true ), 'UTF-8//TRANSLIT', $value )
+				// mb_convert_encoding ( $value, "UTF-8" ) // utf8_encode ( $value )
+
+				$status = pg_insert ( $db_conn, "metadata_raw", $query_metadata_params );
 			}
 			if (! $status) {
-				echo $ndli_uniq_id . "::metadata_raw" . $key . "::" . $value . "::" . pg_errormessage ( $db_conn ) . PHP_EOL;
+				echo $ndli_uniq_id . "::" . $key . "::" . $value . "::" . pg_errormessage ( $db_conn ) . PHP_EOL;
 				break;
 			}
 		}
@@ -611,9 +537,10 @@ class DataSource {
 					"ndli_uniq_id" => $ndli_uniq_id,
 					"src_asset_id" => $asset->src_asset_id,
 					"ndli_asset_id" => $asset->ndli_asset_id,
-					"asset_sequence" => $seq
+					"asset_sequence" => $seq,
+					"asset_type" => $asset->type
 			);
-			$status = @pg_insert ( $db_conn, "assets", $query_asset_params, PGSQL_DML_ESCAPE | PGSQL_DML_EXEC );
+			$status = pg_insert ( $db_conn, "assets", $query_asset_params );
 
 			// INSERT INTO assets_metadata
 			foreach ( $asset->metadata as $field => $value ) {
@@ -623,9 +550,9 @@ class DataSource {
 				$query_asset_metadata_params = array (
 						"ndli_asset_id" => $asset->ndli_asset_id,
 						"asset_metadata_field" => $field,
-						"asset_metadata_value" => StringUtils::convert_to_utf8 ( $value )
+						"asset_metadata_value" => $value
 				);
-				$status = @pg_insert ( $db_conn, "assets_metadata", $query_asset_metadata_params, PGSQL_DML_ESCAPE | PGSQL_DML_EXEC );
+				$status = pg_insert ( $db_conn, "assets_metadata", $query_asset_metadata_params );
 			}
 		}
 
@@ -652,7 +579,7 @@ class DataSource {
 					COUNT(DISTINCT meta_value) count_values,
 					max(char_length(meta_value)) max_len,
 					min(char_length(meta_value)) min_len,
-					CASE WHEN COUNT(DISTINCT(metadata_raw.ndli_uniq_id))=(SELECT COUNT(*)
+					CASE WHEN COUNT(ndli_uniq_id)=(SELECT COUNT(*)
 						FROM items
 						WHERE src_id = '$src_id') THEN true ELSE false END mandatory,
 					CASE WHEN (meta_field IN (SELECT DISTINCT(meta_field) field
@@ -696,7 +623,7 @@ class DataSource {
 	 * @return boolean
 	 */
 	public function set_structure(NDLIStructure $structure) {
-		$structure = json_encode ( $structure->get_structure (), JSON_UNESCAPED_UNICODE );
+		$structure = json_encode ( $structure->get_structure (), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
 		$db = new Database ();
 		$status = pg_update ( $db->get_connection (), "sources", array (
 				"structure" => $structure
@@ -711,96 +638,11 @@ class DataSource {
 	 *
 	 * @return stdClass FIXME
 	 */
-	public function get_report_structure() {
+	public function _check_structure() {
 		$obj = new stdClass ();
-		$obj->missed_collections_in_struct = array (); // ERROR:
-		$obj->missed_collections_in_items = array (); // WARN: empty collections
-		$obj->duplicate_collections_in_struct = array (); // ERROR
-		$obj->duplicate_colmmunities_in_struct = array (); // ERROR
-		$obj->duplicate_cols_coms_in_struct = array (); // ERROR
-		/**
-		 *
-		 * @param array $nodes
-		 * @return array
-		 */
-		function get_collection_communities(array $nodes) {
-			$obj = array (
-					"col" => array (),
-					"com" => array ()
-			);
-			foreach ( $nodes as $node ) {
-				if ($node->type == "COMMUNITY") {
-					$nested = get_collection_communities ( $node->child );
-					array_push ( $obj ["com"], $node->id );
-					$obj ["com"] = array_merge ( $obj ["com"], $nested ["com"] );
-					$obj ["col"] = array_merge ( $obj ["col"], $nested ["col"] );
-				}
-				if ($node->type == "COLLECTION") {
-					array_push ( $obj ["col"], $node->id );
-				}
-			}
-			return $obj;
-		}
-		$structure = array ();
-		$covered_collections = array ();
-		$db = new Database ();
-		$query = "SELECT structure FROM sources WHERE src_id='" . pg_escape_string ( $this->src_id ) . "'";
-		$structure = json_decode ( current ( pg_fetch_all_columns ( pg_query ( $db->get_connection (), $query ) ) ) );
-		$query = "SELECT COALESCE(ndli_collection_id, 'NO_COLLECTION') ndli_collection_id, COUNT(ndli_uniq_id) num_items
-					FROM items
-					WHERE src_id= '" . pg_escape_string ( $this->src_id ) . "'
-					GROUP BY ndli_collection_id
-					ORDER BY num_items DESC";
-		$result = pg_query ( $db->get_connection (), $query );
-		while ( $row = pg_fetch_assoc ( $result ) ) {
-			$covered_collections [$row ["ndli_collection_id"]] = $row ["num_items"];
-		}
-		$db->close_database ();
-
-		$structure = get_collection_communities ( $structure );
-		$id_map_col = array_count_values ( $structure ["col"] );
-		$id_map_com = array_count_values ( $structure ["com"] );
-
-		$obj->duplicate_collections_in_struct = array_filter ( $id_map_col, function ($v, $k) {
-			return $v > 1;
-		}, ARRAY_FILTER_USE_BOTH );
-		$obj->duplicate_colmmunities_in_struct = array_filter ( $id_map_com, function ($v, $k) {
-			return $v > 1;
-		}, ARRAY_FILTER_USE_BOTH );
-		$obj->duplicate_cols_coms_in_struct = array_intersect_key ( $id_map_col, $id_map_com );
-		// FIXME calculate count
-		// $obj->duplicate_cols_coms_in_struct = array_filter ( array_count_values ( array_merge ( $structure ["col"], $structure ["com"] ) ), function ($v, $k) {
-		// return $v > 1;
-		// }, ARRAY_FILTER_USE_BOTH );
-		$obj->missed_collections_in_items = array_values ( array_diff ( array_keys ( $id_map_col ), array_keys ( $covered_collections ) ) );
-		$obj->missed_collections_in_struct = array_values ( array_diff ( array_keys ( $covered_collections ), array_keys ( $id_map_col ) ) );
-
+		$obj->empty_collections = array ();
+		$obj->missed_collections = array ();
 		return $obj;
-	}
-
-	/**
-	 * Automatically generates structure from field-value
-	 *
-	 * @todo incomplete
-	 *      
-	 * @param string $field
-	 */
-	public function auto_generate_structure_from_field(string $field = "ndli_collection_name") {
-		$query = "SELECT col_id, item_covered, to_json(col_names) col_names, array_length(col_names, 1) col_len
-					FROM (
-						SELECT ndli_collection_id col_id, COUNT(items.ndli_uniq_id) item_covered, array_agg(DISTINCT(meta_value)) col_names
-						FROM items, metadata_raw
-						WHERE items.src_id = '" . pg_escape_string ( $this->src_id ) . "'
-							AND items.ndli_uniq_id = metadata_raw.ndli_uniq_id
-							AND meta_field = '" . pg_escape_string ( $field ) . "'
-						GROUP BY ndli_collection_id
-					) virtual_relation
-					ORDER BY col_len DESC, col_id ASC";
-
-		$db = new Database ();
-		$items = pg_fetch_all ( pg_query ( $db->get_connection (), $query ) );
-		$db->close_database ();
-		print_r ( $items );
 	}
 }
 /**
@@ -809,8 +651,10 @@ class DataSource {
  *        
  */
 abstract class ImportHandler {
+	const DOCUMENT_LIMIT = 10000;
 	protected $src_id;
 	private $documents = null;
+	private $err_limit_out_of_range = "ERROR: limit exceeds; max limit " . self::DOCUMENT_LIMIT;
 	private $errors = array ();
 	/**
 	 *
@@ -827,13 +671,22 @@ abstract class ImportHandler {
 	/**
 	 *
 	 * @param NDLIDocument $document
-	 * @return number
+	 * @param string $collection_id
+	 * @param string $collection_name
+	 * @return int
 	 */
-	protected function add_document(NDLIDocument $document) {
+	protected function add_document(NDLIDocument $document, string $collection_id = null, string $collection_name = null) {
+		if ($this->documents->size () == self::DOCUMENT_LIMIT) {
+			array_push ( $this->errors, $this->err_limit_out_of_range );
+			return 0;
+		}
+		if ($collection_id) {
+			$document->set_collection ( $collection_id, $collection_name );
+		}
 		return $this->documents->add_document_to_set ( $document );
 	}
-	public function _release_documents() {
-		// $this->documents = new NDLIDocumentSet ();
+	protected function release_documents() {
+		$this->documents = new NDLIDocumentSet ();
 	}
 	/**
 	 *

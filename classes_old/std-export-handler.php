@@ -10,8 +10,7 @@ abstract class ExportHandler {
 	protected $src_id;
 	protected $type;
 	protected $documents = array ();
-	protected $verbose = true;
-	const DOCUMENT_LIMIT = 100000;
+	const DOCUMENT_LIMIT = 50000;
 	/**
 	 *
 	 * @param string $src_id
@@ -42,8 +41,6 @@ abstract class ExportHandler {
 		return count ( $this->documents );
 	}
 	abstract public function write_documents();
-	protected function unnest_metadata() {
-	}
 }
 
 /**
@@ -143,7 +140,7 @@ class JSONExportHandler extends ExportHandler {
 					}
 					array_push ( $documents, $obj );
 				}
-				file_put_contents ( $this->output_folder_path . "/" . $this->filename_prefix . ($counter ++) . ".json", json_encode ( $documents, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE ) );
+				file_put_contents ( $this->output_folder_path . "/" . $this->filename_prefix . ($counter ++) . ".json", json_encode ( $documents, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) );
 			}
 			if ($doc_count < $this->num_rows) {
 				break;
@@ -181,10 +178,7 @@ class JSONExportHandler extends ExportHandler {
  */
 class SIPExportHandler extends ExportHandler {
 	private $output_folder_path = null;
-	private $sip_split_size = 100000;
-	private $dc_source = null;
-	private $dc_source_uri = null;
-
+	private $num_rows = 1000;
 	/**
 	 *
 	 * @param string $src_id
@@ -196,97 +190,25 @@ class SIPExportHandler extends ExportHandler {
 		$this->type = ExportHandler::TYPE_MAPPED;
 	}
 	public function write_documents() {
-		$db = new Database ();
-		$data_source = new DataSourceExtended ( $this->src_id, $db->get_connection () );
-		$source_details = $data_source->get_source_details ();
-		$db->close_database ();
-
-		$this->dc_source = $source_details ["src_name"];
-		$this->dc_source_uri = $source_details ["src_url"];
-
-		if ($this->verbose) {
-			$start = time ();
-			echo "\tExporting collections (with items)...\t";
-		}
-		$collection_folders = array ();
 		$offset = 0;
-		$batch = 1;
 		while ( true ) {
-			if ($doc_count = $this->fetch_documents ( $this->sip_split_size, $offset )) {
+			if ($doc_count = $this->fetch_documents ( $this->num_rows, $offset )) {
 				foreach ( $this->documents as $document ) {
-					$metadata = json_decode ( $document ["meta_value"] );
-					$collection_id = $document ["ndli_collection_id"] ?: $this->src_id . "_batch" . $batch;
-					$this->create_sip_document ( $document ["ndli_uniq_id"], $collection_id, $metadata );
-					array_push ( $collection_folders, $collection_id );
+					$this->create_sip_document ( $document ["ndli_uniq_id"], $document ["ndli_collection_id"], json_decode ( $document ["meta_value"] ) );
 				}
 			}
-			if ($doc_count < $this->sip_split_size) {
+			if ($doc_count < $this->num_rows) {
 				break;
 			}
-			$offset += $this->sip_split_size;
-			$batch ++;
-		}
-		if ($this->verbose) {
-			echo "SUCCESS" . (" [" . count ( $collection_folders ) . " collections in " . (time () - $start) . " secs]") . PHP_EOL;
-		}
-
-		if (json_decode ( $source_details ["structure"] )) {
-			// creating AIP structure
-			if ($this->verbose) {
-				$start = time ();
-				echo "\tCreating AIP structure (for collections)...\t";
-			}
-			FileSystemUtils::create_dir ( $this->output_folder_path . "/structure" );
-			$export_handler = new AIPExportHandler ( $this->src_id, $this->output_folder_path . "/structure", false );
-			$export_handler->write_documents ();
-			if ($this->verbose) {
-				echo "SUCCESS" . (" [" . (time () - $start) . " secs]") . PHP_EOL;
-			}
-
-			// creating shell script
-			if ($this->verbose) {
-				$start = time ();
-				echo "\tCreating DSpace import shell script...\t";
-			}
-			$import_script_file = $this->output_folder_path . "/dspace-import-script-" . $this->src_id . ".sh";
-
-			$configuration = Configuration::get_dspace_configuration ();
-			$command_args = array (
-					$configuration->execPath,
-					"import",
-					"-a -e " . $configuration->user
-			);
-			file_put_contents ( $import_script_file, "mkdir map-files" . PHP_EOL );
-			foreach ( array_unique ( $collection_folders ) as $collection ) {
-				$command_dynamic_elements = array (
-						"-c $collection",
-						"-s " . "./data/COLL@" . str_replace ( "/", "_", $collection ),
-						"-m " . "./map-files/" . str_replace ( "/", "_", $collection ) . "_" . time () . ".map"
-				);
-				file_put_contents ( $import_script_file, implode ( " ", array_merge ( $command_args, $command_dynamic_elements ) ) . PHP_EOL, FILE_APPEND );
-
-				if ($configuration->sleep) {
-					file_put_contents ( $import_script_file, "sleep " . $configuration->sleep . PHP_EOL, FILE_APPEND );
-				}
-			}
-			if ($this->verbose) {
-				echo "SUCCESS" . (" [" . (time () - $start) . " secs]") . PHP_EOL;
-			}
+			$offset += $this->num_rows;
 		}
 	}
 	private function create_sip_document(string $document_id, string $collection_id, stdClass $metadata) {
-		$path = $this->output_folder_path . "/data/COLL@" . str_replace ( "/", "_", $collection_id ) . "/ITEM@" . str_replace ( "/", "_", $document_id );
+		$path = $this->output_folder_path . "/COLL@" . str_replace ( "/", "_", $collection_id ) . "/ITEM@" . str_replace ( "/", "_", $document_id );
 		FileSystemUtils::create_dir ( $path );
 
 		touch ( $path . "/contents" );
 		file_put_contents ( $path . "/handle", $document_id );
-
-		$metadata->{"dc.source"} = array (
-				$this->dc_source
-		);
-		$metadata->{"dc.source.uri"} = array (
-				$this->dc_source_uri
-		);
 
 		$schemas = array ();
 		foreach ( $metadata as $field => $values ) {
@@ -304,34 +226,7 @@ class SIPExportHandler extends ExportHandler {
 			foreach ( $fields as $field => $values ) {
 				$components = explode ( ".", $field );
 				$element = $components [1];
-				$qualifier = (sizeof ( $components ) == 3) ? $components [2] : null;
-
-				$json_key = null;
-				if ($qualifier) {
-					$components_rec = explode ( "@", $qualifier );
-					if (count ( $components_rec ) == 2) {
-						$qualifier = $components_rec [0];
-						$json_key = $components_rec [1];
-					}
-				}
-				$field = str_replace ( "@" . $json_key, "", $field );
-				if (is_array ( $values )) {
-					foreach ( $values as &$value ) {
-						if ($json_key) {
-							$obj = new stdClass ();
-							$obj->$json_key = $value;
-							$value = json_encode ( $obj, JSON_UNESCAPED_UNICODE );
-						}
-					}
-				} else if (is_object ( $values )) {
-				} else {
-					if ($json_key) {
-						$obj = new stdClass ();
-						$obj->$json_key = $values;
-						$values = json_encode ( $obj, JSON_UNESCAPED_UNICODE );
-					}
-				}
-
+				$qualifier = @$components [2] ? $components [2] : null;
 				foreach ( $values as $value ) {
 					$tag = $xml->addChild ( "dcvalue", htmlspecialchars ( $value ) );
 					$tag->addAttribute ( "element", $element );
@@ -341,7 +236,7 @@ class SIPExportHandler extends ExportHandler {
 				}
 			}
 			// $xml->saveXML ( $file );
-			$dom = new DOMDocument ( '1.0', 'utf-8' );
+			$dom = new DOMDocument ( '1.0' );
 			$dom->preserveWhiteSpace = false;
 			$dom->formatOutput = true;
 			$dom->loadXML ( $xml->asXML () );
@@ -364,36 +259,30 @@ class SIPExportHandler extends ExportHandler {
  */
 class AIPExportHandler extends ExportHandler {
 	private $output_folder_path = null;
-	private $generate_items = false;
 	private $num_rows = 1000;
 	private $structure = null;
-	private $dc_source = null;
-	private $dc_source_uri = null;
+	private $src_name = null;
 	private $dspace_version = null;
 	private $community_schema_file = "/assets/templates/AIP_mets_schema_community.xml";
 	private $collection_schema_file = "/assets/templates/AIP_mets_schema_collection.xml";
 	private $item_schema_file = "/assets/templates/AIP_mets_schema_item.xml";
-
 	/**
 	 *
 	 * @param string $src_id
 	 * @param string $output_folder
-	 * @param bool $generate_items
 	 */
-	public function __construct(string $src_id, string $output_folder, bool $generate_items = true) {
+	public function __construct(string $src_id, string $output_folder) {
 		$this->src_id = $src_id;
 		$this->output_folder_path = $output_folder;
 		$this->type = ExportHandler::TYPE_MAPPED;
-		$this->dspace_version = Configuration::get_dspace_configuration ()->{"version"};
-		$this->generate_items = $generate_items;
+		$this->dspace_version = Configuration::get_dspace_export_version ();
 
 		$db = new Database ();
 		$data_source = new DataSourceExtended ( $src_id, $db->get_connection () );
 		$source_details = $data_source->get_source_details ();
 		$db->close_database ();
 
-		$this->dc_source = $source_details ["src_name"];
-		$this->dc_source_uri = $source_details ["src_url"];
+		$this->src_name = $source_details ["src_name"];
 		$this->structure = json_decode ( $source_details ["structure"] ) ?: null;
 	}
 	public function write_documents() {
@@ -411,7 +300,7 @@ class AIPExportHandler extends ExportHandler {
 		}
 		$metadata = array (
 				"dc.title" => array (
-						$this->dc_source
+						$this->src_name
 				)
 		);
 		$this->create_community ( $root_handle, null, $metadata, $list_child_collection, $list_child_sub_community );
@@ -420,20 +309,18 @@ class AIPExportHandler extends ExportHandler {
 		$this->export_as_aip ( $this->structure, $root_handle );
 
 		// creating items
-		if ($this->generate_items) {
-			$offset = 0;
-			while ( true ) {
-				if ($doc_count = $this->fetch_documents ( $this->num_rows, $offset )) {
-					// print_r ( $this->fetch_documents ( $this->num_rows, $offset ) );
-					foreach ( $this->documents as $document ) {
-						$this->create_item ( $document ["ndli_uniq_id"], $document ["ndli_collection_id"], json_decode ( $document ["meta_value"], true ) );
-					}
+		$offset = 0;
+		while ( true ) {
+			if ($doc_count = $this->fetch_documents ( $this->num_rows, $offset )) {
+				// print_r ( $this->fetch_documents ( $this->num_rows, $offset ) );
+				foreach ( $this->documents as $document ) {
+					$this->create_item ( $document ["ndli_uniq_id"], $document ["ndli_collection_id"], json_decode ( $document ["meta_value"], true ) );
 				}
-				if ($doc_count < $this->num_rows) {
-					break;
-				}
-				$offset += $this->num_rows;
 			}
+			if ($doc_count < $this->num_rows) {
+				break;
+			}
+			$offset += $this->num_rows;
 		}
 	}
 	/**
@@ -486,7 +373,7 @@ class AIPExportHandler extends ExportHandler {
 		$dc_title = array_key_exists ( "dc.title", $metadata ) ? current ( $metadata ["dc.title"] ) : null; // take only first value
 		$dc_identifier_uri = array_key_exists ( "dc.identifier.uri", $metadata ) ? $metadata ["dc.identifier.uri"] : array ();
 
-		$dom = new DOMDocument ( '1.0', 'utf-8' );
+		$dom = new DOMDocument ();
 		$dom->formatOutput = true;
 		$xml_content = str_replace ( 'xmlns="http://www.loc.gov/METS/" ', "", file_get_contents ( dirname ( __DIR__ ) . "/" . $this->community_schema_file ) );
 		$dom->loadXML ( $xml_content );
@@ -702,14 +589,10 @@ class AIPExportHandler extends ExportHandler {
 	 * @return boolean
 	 */
 	private function create_collection(string $collection_handle_id, string $parent_community_handle_id, array $metadata) {
-		if ($this->generate_items) {
-			$db = new Database ();
-			$data_source = new DataSourceExtended ( $this->src_id, $db->get_connection () );
-			$list_child_items = $data_source->get_child_items ( $collection_handle_id );
-			$db->close_database ();
-		} else {
-			$list_child_items = array ();
-		}
+		$db = new Database ();
+		$data_source = new DataSourceExtended ( $this->src_id, $db->get_connection () );
+		$list_child_items = $data_source->get_child_items ( $collection_handle_id );
+		$db->close_database ();
 
 		$a = explode ( "/", $collection_handle_id );
 		$handle_prefix = $a [0];
@@ -901,13 +784,6 @@ class AIPExportHandler extends ExportHandler {
 		$dc_title = array_key_exists ( "dc.title", $metadata ) ? current ( $metadata ["dc.title"] ) : null; // take only first value
 		$dc_identifier_uri = array_key_exists ( "dc.identifier.uri", $metadata ) ? $metadata ["dc.identifier.uri"] : array ();
 
-		$metadata ["dc.source"] = array (
-				$this->dc_source
-		);
-		$metadata ["dc.source.uri"] = array (
-				$this->dc_source_uri
-		);
-
 		$dom = new DOMDocument ();
 		$xml_content = str_replace ( 'xmlns="http://www.loc.gov/METS/" ', "", file_get_contents ( dirname ( __DIR__ ) . "/" . $this->item_schema_file ) );
 		$dom->loadXML ( $xml_content );
@@ -1080,7 +956,7 @@ class AIPExportHandler extends ExportHandler {
 	private function configure_dmdSec_1(&$dom, $xpath, &$mods, $dc_title, $dc_identifier_uri) {
 		foreach ( $mods as $mod ) {
 			foreach ( $dc_identifier_uri as $each ) {
-				$new_node = $dom->createElement ( "mods:identifier", htmlspecialchars ( $each ) );
+				$new_node = $dom->createElement ( "mods:identifier", $each );
 				$new_node->setAttribute ( "type", "uri" );
 				$mod->appendChild ( $new_node );
 			}
@@ -1095,43 +971,13 @@ class AIPExportHandler extends ExportHandler {
 		foreach ( $dim as $b ) {
 			foreach ( $metadata as $key => $values ) {
 				$meta = explode ( ".", $key );
-				$schema = $meta [0];
-				$element = $meta [1];
-				$qualifier = (sizeof ( $meta ) == 3) ? $meta [2] : null;
-				// /////////////////////
-				$json_key = null;
-				if ($qualifier) {
-					$components_rec = explode ( "@", $qualifier );
-					if (count ( $components_rec ) == 2) {
-						$qualifier = $components_rec [0];
-						$json_key = $components_rec [1];
-					}
-				}
-				$key = str_replace ( "@" . $json_key, "", $key );
-				if (is_array ( $values )) {
-					foreach ( $values as &$value ) {
-						if ($json_key) {
-							$obj = new stdClass ();
-							$obj->$json_key = $value;
-							$value = json_encode ( $obj, JSON_UNESCAPED_UNICODE );
-						}
-					}
-				} else if (is_object ( $values )) {
-				} else {
-					if ($json_key) {
-						$obj = new stdClass ();
-						$obj->$json_key = $values;
-						$values = json_encode ( $obj, JSON_UNESCAPED_UNICODE );
-					}
-				}
-				// /////////////////////
 				foreach ( $values as $value ) {
 					$elem = $dom->createElement ( "dim:field", htmlspecialchars ( $value ) );
 
-					$elem->setAttribute ( "mdschema", $schema );
-					$elem->setAttribute ( "element", $element );
-					if ($qualifier) {
-						$elem->setAttribute ( "qualifier", $qualifier );
+					$elem->setAttribute ( "mdschema", $meta [0] );
+					$elem->setAttribute ( "element", $meta [1] );
+					if (sizeof ( $meta ) == 3) {
+						$elem->setAttribute ( "qualifier", $meta [2] );
 					}
 					$elem->setAttribute ( "lang", "" );
 					$b->appendChild ( $elem );

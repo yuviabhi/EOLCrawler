@@ -1,6 +1,7 @@
 <?php
-ini_set ( 'memory_limit', '12G' );
-ini_set ( 'max_execution_time', 3600 );
+date_default_timezone_set ( 'UTC' );
+ini_set ( 'memory_limit', '6G' );
+ini_set ( 'max_execution_time', 60 );
 const PROJECT_NAME = "Data Acquisition System";
 const PROJECT_VER = "v0.9b";
 
@@ -18,14 +19,14 @@ class Logger {
 		$line = array (
 				date ( "Y-m-d H:i:s" ),
 				$src_id,
-				str_replace ( '"', '""', $statement )
+				$statement
 		);
 		switch ($type) {
 			case self::LOG_TYPE_ERROR :
-				file_put_contents ( dirname ( __DIR__ ) . "/logs/error.log", implode ( "\t", $line ) . PHP_EOL, FILE_APPEND | LOCK_EX );
+				file_put_contents ( $_SERVER ["DOCUMENT_ROOT"] . "/logs/error.log", implode ( "\t", $line ) . PHP_EOL, FILE_APPEND | LOCK_EX );
 				break;
 			case self::LOG_TYPE_EVENT :
-				file_put_contents ( dirname ( __DIR__ ) . "/logs/event.log", implode ( "\t", $line ) . PHP_EOL, FILE_APPEND | LOCK_EX );
+				file_put_contents ( $_SERVER ["DOCUMENT_ROOT"] . "/logs/event.log", implode ( "\t", $line ) . PHP_EOL, FILE_APPEND | LOCK_EX );
 				break;
 		}
 	}
@@ -67,8 +68,6 @@ class DataSourceExtended extends DataSource {
 	 */
 	public static function get_document_details(string $ndli_uniq_doc_id) {
 		$obj = new stdClass ();
-		// item
-		$query_collection = "SELECT ndli_created, ndli_collection_id FROM items WHERE ndli_uniq_id = '" . pg_escape_string ( $ndli_uniq_doc_id ) . "'";
 
 		// metadata
 		$query_metadata = "SELECT meta_field, json_agg(meta_value ORDER BY id ASC)::text meta_values
@@ -84,7 +83,6 @@ class DataSourceExtended extends DataSource {
 					ORDER BY asset_sequence, assets.ndli_asset_id;";
 
 		$db = new Database ();
-		$obj->item = pg_fetch_array ( pg_query ( $db->get_connection (), $query_collection ) );
 		$obj->metadata = pg_fetch_all ( pg_query ( $db->get_connection (), $query_metadata ) );
 		$obj->assets = pg_fetch_all ( pg_query ( $db->get_connection (), $query_assets ) );
 		if (! $obj->assets) {
@@ -102,14 +100,18 @@ class DataSourceExtended extends DataSource {
 	public static function get_all_sources($db_conn) {
 		$query = "SELECT sources.src_id, sources.src_name, sources.src_url, sources.src_configuration, to_json(sources.users) users, MAX(ndli_updated) ndli_updated,
 					COUNT(items.src_id) item_count,
-					CASE WHEN COUNT(items.src_id) > 0 THEN (
-						CASE WHEN sources.src_id IN ( SELECT DISTINCT(src_id) FROM items WHERE ndli_uniq_id IN (SELECT DISTINCT(ndli_uniq_id) FROM metadata_mapped)) THEN 'S3'
-							WHEN COUNT(to_regclass('public.' || sources.src_id ||'_raw_item'))=0 THEN 'S9' -- is view-generated
-							WHEN sources.rules::text <> '{}'::text THEN 'S2'
-							ELSE 'S1'
-						END
-					)
-					ELSE 'S0'
+					CASE
+						WHEN sources.src_id IN (
+							SELECT DISTINCT(src_id) FROM items
+							WHERE ndli_uniq_id IN (SELECT DISTINCT(ndli_uniq_id) FROM metadata_mapped)) THEN (
+								CASE
+									WHEN COUNT(to_regclass('public.' || sources.src_id ||'_raw_asset'))=0 THEN 'S9'
+									ELSE 'S3'
+								END
+							)
+						WHEN sources.rules::text <> '{}'::text THEN 'S2'
+						WHEN COUNT(items.src_id) > 0 THEN 'S1'
+						ELSE 'S0'
 					END state
 					FROM sources LEFT JOIN items ON sources.src_id = items.src_id
 					GROUP BY sources.src_id ORDER BY item_count DESC";
@@ -134,7 +136,7 @@ class DataSourceExtended extends DataSource {
 					FROM sources LEFT JOIN items ON sources.src_id = items.src_id
 					WHERE sources.src_id='" . pg_escape_string ( $this->src_id ) . "'
 					GROUP BY sources.src_id";
-		$items = pg_fetch_assoc ( pg_query ( $this->db_conn, $query ) );
+		$items = pg_fetch_array ( pg_query ( $this->db_conn, $query ) );
 		return $items ?: array ();
 	}
 
@@ -172,7 +174,7 @@ class DataSourceExtended extends DataSource {
 			$query_params ["users"] = '{"' . implode ( '","', $users ) . '"}';
 		}
 
-		$status = pg_insert ( $this->db_conn, "sources", $query_params, PGSQL_DML_ESCAPE | PGSQL_DML_EXEC );
+		$status = pg_insert ( $this->db_conn, "sources", $query_params );
 
 		return $status ? true : false;
 	}
@@ -227,35 +229,22 @@ class DataSourceExtended extends DataSource {
 	 * @param stdClass $translate_rules
 	 * @param stdClass $add_rules
 	 * @param array $asset_meta
-	 * @param bool $verbose
 	 * @return boolean
 	 */
-	public function run_mapping(stdClass $translate_rules, stdClass $add_rules, array $asset_meta, bool $verbose = false) {
-		Logger::add_log ( "Mapping started", $this->src_id, Logger::LOG_TYPE_EVENT );
+	public function run_mapping(stdClass $translate_rules, stdClass $add_rules, array $asset_meta) {
 		pg_flush ( $this->db_conn );
 		$result = pg_query ( $this->db_conn, "BEGIN" ) ? true : false;
 
 		// delete already mapped-data (in any)
-		if ($verbose) {
-			$start = time ();
-			echo "\tDeleting old mapped-data (if any)...\t";
-		}
 		if ($result) {
 			$query = "DELETE FROM metadata_mapped WHERE ndli_uniq_id IN (
 						SELECT ndli_uniq_id FROM items WHERE src_id = '" . pg_escape_string ( $this->src_id ) . "'
 					)";
 			$result = pg_query ( $this->db_conn, $query );
 		}
-		if ($verbose) {
-			echo ($result ? "SUCCESS" : "FAILED") . (" [" . (time () - $start) . " secs]") . PHP_EOL;
-		}
 
 		// handle $translate_rules
 		if ($result) {
-			if ($verbose) {
-				$start = time ();
-				echo "\tCopying selected metadata-values...\t";
-			}
 			$query = "INSERT INTO metadata_mapped (ndli_uniq_id, meta_field, meta_value, ref_id) (
 						SELECT ndli_uniq_id, meta_field, meta_value, id
 						FROM metadata_raw
@@ -263,16 +252,8 @@ class DataSourceExtended extends DataSource {
 							AND meta_field IN ('" . implode ( "','", array_keys ( ( array ) $translate_rules ) ) . "')
 					) RETURNING ndli_uniq_id";
 			$result = pg_query ( $this->db_conn, $query );
-			if ($verbose) {
-				echo ($result ? "SUCCESS" : "FAILED") . (" [" . (time () - $start) . " secs]") . PHP_EOL;
-			}
 		}
-
 		if ($result) {
-			if ($verbose) {
-				$start = time ();
-				echo "\tUpdating affected metadata-fields...\t";
-			}
 			array_values ( array_unique ( pg_fetch_all_columns ( $result ) ) );
 			foreach ( $translate_rules as $old => $new ) {
 				if ($result) {
@@ -283,17 +264,10 @@ class DataSourceExtended extends DataSource {
 					$result = pg_query ( $this->db_conn, $query );
 				}
 			}
-			if ($verbose) {
-				echo ($result ? "SUCCESS" : "FAILED") . (" [" . (time () - $start) . " secs]") . PHP_EOL;
-			}
 		}
 
 		// handle $add_rules
-		if ($result && $add_rules) {
-			if ($verbose) {
-				$start = time ();
-				echo "\tPerforming add-metadata operation(s)...\t";
-			}
+		if ($result) {
 			foreach ( $add_rules as $field => $value ) {
 				if ($result) {
 					$query = "INSERT INTO metadata_mapped (ndli_uniq_id, meta_field, meta_value, ref_id) (
@@ -306,17 +280,10 @@ class DataSourceExtended extends DataSource {
 					break;
 				}
 			}
-			if ($verbose) {
-				echo ($result ? "SUCCESS" : "FAILED") . (" [" . (time () - $start) . " secs]") . PHP_EOL;
-			}
 		}
 
 		// handle $asset_meta
 		if ($result) {
-			if ($verbose) {
-				$start = time ();
-				echo "\tCopying asset related metadata...\t";
-			}
 			$query = "INSERT INTO metadata_mapped (ndli_uniq_id, meta_field, meta_value) (
 					SELECT ndli_uniq_id, 'ndl.sourceMeta.additionalInfo@asset' meta_field,
 						('{\"ndli.assset.id\":\"' || (assets.ndli_asset_id) || '\"}')::jsonb || jsonb_object_agg(asset_metadata_field, asset_metadata_value) meta_value
@@ -327,17 +294,8 @@ class DataSourceExtended extends DataSource {
 					GROUP BY ndli_uniq_id, assets.ndli_asset_id
 				)";
 			$result = pg_query ( $this->db_conn, $query );
-			if ($verbose) {
-				echo ($result ? "SUCCESS" : "FAILED") . (" [" . (time () - $start) . " secs]") . PHP_EOL;
-			}
 		}
 
-		if ($result) {
-			Logger::add_log ( "Mapping completed successfully", $this->src_id, Logger::LOG_TYPE_EVENT );
-		} else {
-			Logger::add_log ( "Mapping failed", $this->src_id, Logger::LOG_TYPE_EVENT );
-			Logger::add_log ( "Mapping failed; " . pg_last_error ( $this->db_conn ), $this->src_id, Logger::LOG_TYPE_ERROR );
-		}
 		return (pg_query ( $this->db_conn, ($result ? "COMMIT" : "ROLLBACK") ) && $result) ? true : false;
 	}
 	/**
@@ -394,7 +352,7 @@ class DataSourceExtended extends DataSource {
 					FROM metadata_raw
 					WHERE ndli_uniq_id IN ( SELECT ndli_uniq_id FROM items WHERE src_id = '" . pg_escape_string ( $this->src_id ) . "' )
 						AND meta_field='$field'
-						" . ($search_key ? " AND meta_value ilike '%" . pg_escape_string ( strtolower ( $search_key ) ) . "%'" : "") . "
+						" . ($search_key ? " AND meta_value ilike '%" . strtolower ( $search_key ) . "%'" : "") . "
 					GROUP BY meta_value
 					ORDER BY $sort_field $sort_order
 					LIMIT " . $limit . " OFFSET $offset;";
@@ -547,7 +505,7 @@ class DataSourceExtended extends DataSource {
 	 * @param int $facet_offset
 	 * @return array
 	 */
-	public function get_faceted_report_mapped(int $facet_limit = 25, int $facet_offset = 0) {
+	public function get_faceted_report_mapped(int $facet_limit = 50, int $facet_offset = 0) {
 		$query = "SELECT meta_field, (
 					SELECT json_object_agg(meta_value, cnt)
 					FROM (
@@ -593,6 +551,7 @@ class DataSourceExtended extends DataSource {
 					FROM items
 					WHERE ndli_collection_id = '" . pg_escape_string ( $parent_id ) . "'";
 		$items = pg_fetch_all_columns ( pg_query ( $this->db_conn, $query ) );
+
 		return $items ?: array ();
 	}
 }
@@ -654,7 +613,7 @@ class NDLISchema {
  * @author poonam
  *        
  */
-class User {
+class User extends Database {
 	const CATEGORY_LS = "ls";
 	const CATEGORY_CS = "cs";
 	const CATEGORY_ADMIN = "admin";
@@ -675,42 +634,16 @@ class User {
 				"fullname" => $fullname
 		);
 
-		$db = new Database ();
-		$status = pg_insert ( $db->get_connection (), "users", $query_params, PGSQL_DML_ESCAPE | PGSQL_DML_EXEC );
-		$db->close_database ();
+		$db = self::create_database_connection ();
+		$status = pg_insert ( $db, "users", $query_params );
+		self::close_database ();
 		return $status ? true : false;
 	}
 
 	/**
 	 *
-	 * @param string $mail
-	 * @param string $password
-	 * @param string $fullname
-	 */
-	public static function update_user(string $mail, string $password, string $fullname) {
-		$query_params = array ();
-		if ($password) {
-			$query_params ["passwd"] = $password;
-		}
-		if ($fullname) {
-			$query_params ["fullname"] = $fullname;
-		}
-		if (! $query_params) {
-			return false;
-		}
-		$condition = array (
-				"mail_id" => $mail
-		);
-		$db = new Database ();
-		$status = pg_update ( $db->get_connection (), "users", $query_params, $condition, PGSQL_DML_ESCAPE | PGSQL_DML_EXEC );
-		$db->close_database ();
-		return $status ? true : false;
-	}
-
-	/**
-	 *
-	 * @param resource $db_conn
 	 * @param bool $exclude_admin
+	 * @param resource $db_conn
 	 * @return array
 	 */
 	public static function get_all_users($db_conn, bool $exclude_admin = true) {

@@ -68,7 +68,6 @@ class NDLIConstraints {
 	 * @return string
 	 */
 	protected function normalize_field_name(string $field) {
-		$field = preg_replace ( "/\[.*?\]/", "", $field );
 		return trim ( preg_replace ( "/(\W|\_)+/", "_", strtolower ( trim ( $field ) ) ), "_" );
 	}
 
@@ -93,8 +92,9 @@ class NDLIAsset extends NDLIConstraints {
 
 	/**
 	 *
-	 * @param string $src_id
-	 * @param string $src_asset_id
+	 * @param string $asset_id
+	 * @param string $asset_type
+	 *        	type of the asset; use const
 	 */
 	function __construct(string $src_id, string $src_asset_id) {
 		$this->src_asset_id = $src_asset_id;
@@ -146,6 +146,7 @@ class NDLIAsset extends NDLIConstraints {
 		$obj = new stdClass ();
 		$obj->src_asset_id = $this->src_asset_id;
 		$obj->ndli_asset_id = $this->ndli_asset_id;
+		$obj->type = $this->asset_type;
 		$obj->metadata = $this->metadata;
 		return $obj;
 	}
@@ -157,16 +158,15 @@ class NDLIAsset extends NDLIConstraints {
  *        
  */
 class NDLIDocument extends NDLIConstraints {
-	private $src_document_id = null;
-	private $ndli_document_id = null;
+	private $document_id = null;
 	private $collection_id = null;
 	private $metadata = array ();
 	private $assets = array ();
 	private $url_thumbnail = array ();
 	private function set_metadata(string $name, $values) {
 		if ($values) {
-			$this->metadata [$name] = is_array ( $values ) ? array_map ( "trim", $values ) : array (
-					trim ( $values )
+			$this->metadata [$name] = is_array ( $values ) ? $values : array (
+					$values
 			);
 			return true;
 		}
@@ -177,8 +177,7 @@ class NDLIDocument extends NDLIConstraints {
 	 * @param string $id
 	 */
 	public function __construct(string $id) {
-		$this->src_document_id = trim ( $id );
-		$this->ndli_document_id = $this->normalize_id ( trim ( $id ) );
+		$this->document_id = $this->normalize_id ( $id );
 	}
 
 	/**
@@ -203,12 +202,9 @@ class NDLIDocument extends NDLIConstraints {
 	 */
 	public function _remove_metadata_field_values(string $field, $values) {
 		$field = $this->normalize_field_name ( $field );
-		// $old_count = count ( $values );
 		if (array_key_exists ( $field, $this->metadata )) {
-			unset ( $this->metadata [$field] ); // FIXME
-			$this->metadata [$field] = array_values ( $this->metadata [$field] );
-		}
-		if (! $this->metadata [$field]) {
+			unset ( $this->metadata [$field] );
+			return true;
 		}
 		return false;
 	}
@@ -219,27 +215,51 @@ class NDLIDocument extends NDLIConstraints {
 	 *        	name of the field
 	 * @param mixed $values
 	 *        	the value(s) of the field
+	 * @param bool $process_nested_field
 	 * @param string $language
 	 *        	[incomplete] language code of the value(s)
 	 */
-	public function add_metadata(string $field, $values, string $language = null) {
+	public function add_metadata(string $field, $values, bool $process_nested_field = true, string $language = null) {
 		$field = $this->normalize_field_name ( $field );
+		$components = explode ( ".", $field );
+		$json_key = null;
+		if ($process_nested_field) {
+			if ($qualifier = @$components [2] ? $components [2] : null) {
+				$components_rec = explode ( "@", $qualifier );
+				if (count ( $components_rec ) == 2) {
+					$qualifier = $components_rec [0];
+					$json_key = $components_rec [1];
+				}
+			}
+			$field = str_replace ( "@" . $json_key, "", $field );
+			if (is_array ( $values )) {
+				foreach ( $values as &$value ) {
+					if ($json_key) {
+						$obj = new stdClass ();
+						$obj->$json_key = $value;
+						$value = json_encode ( $obj, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+					}
+				}
+			} else if (is_object ( $values )) {
+			} else {
+				if ($json_key) {
+					$obj = new stdClass ();
+					$obj->$json_key = $values;
+					$values = json_encode ( $obj, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+				}
+			}
+		}
 
-		if (! $field) {
-			$field = "ndli_undefined_field";
-		}
+		// FIXME handling object
 		if (is_object ( $values )) {
-			$values = json_encode ( $values, JSON_UNESCAPED_UNICODE );
+			$values = json_encode ( $values );
 		}
+
+		// adding metadata ///////////////
 		if (! is_array ( $values )) {
 			$values = array (
 					$values
 			);
-		}
-		foreach ( $values as $i => $value ) {
-			if (is_iterable ( $value )) {
-				$values [$i] = json_encode ( $value );
-			}
 		}
 		if ($values = array_values ( array_filter ( array_map ( "trim", $values ) ) )) {
 			$this->metadata [$field] = array_key_exists ( $field, $this->metadata ) ? array_merge ( $this->metadata [$field], $values ) : $values;
@@ -272,39 +292,28 @@ class NDLIDocument extends NDLIConstraints {
 
 	/**
 	 *
-	 * @param string $src_id
-	 * @param mixed $src_document_ids
-	 * @return boolean
+	 * @param mixed $ndli_document_ids
 	 */
-	public function add_parts(string $src_id, $src_document_ids) {
-		if (! is_array ( $src_document_ids )) {
-			$src_document_ids = array (
-					$src_document_ids
+	public function add_parts($ndli_document_ids) {
+		if (! is_array ( $ndli_document_ids )) {
+			$ndli_document_ids = array (
+					$ndli_document_ids
 			);
 		}
-		foreach ( $src_document_ids as &$id ) {
-			$id = $src_id . "/" . $this->normalize_id ( $id );
+		foreach ( $ndli_document_ids as &$id ) {
+			$id = $this->normalize_id ( $id );
 		}
-		return $this->add_metadata ( "ndli_relation_parts", $src_document_ids );
+		$this->add_metadata ( "ndli_relation_parts", $ndli_document_ids );
 	}
 
 	/**
 	 *
-	 * @param string $src_id
-	 * @param mixed $src_document_ids
+	 * @param string $ids
 	 * @param string $relation_name
-	 * @return boolean
+	 * @param string $sequence_number
 	 */
-	public function add_related_items(string $src_id, $src_document_ids, string $relation_name) {
-		if (! is_array ( $src_document_ids )) {
-			$src_document_ids = array (
-					$src_document_ids
-			);
-		}
-		foreach ( $src_document_ids as &$id ) {
-			$id = $src_id . "/" . $this->normalize_id ( $id );
-		}
-		return $this->add_metadata ( $this->normalize_field_name ( "ndli_relation_" . $relation_name ), $src_document_ids );
+	public function _add_related_items(string $ids, string $relation_name) {
+		// FIXME id-norm
 	}
 
 	/**
@@ -317,7 +326,7 @@ class NDLIDocument extends NDLIConstraints {
 		if ($collection_id) {
 			$this->collection_id = $this->normalize_id ( $collection_id );
 			if ($collection_name) {
-				$this->set_metadata ( "ndli_collection_name", trim ( $collection_name ) );
+				$this->set_metadata ( "ndli_collection_name", $collection_name );
 			}
 			return true;
 		}
@@ -334,7 +343,7 @@ class NDLIDocument extends NDLIConstraints {
 		if ($webpage_url) {
 			$this->set_metadata ( "ndli_webpage_url", $webpage_url );
 			if ($breadcrumbs) {
-				$this->set_metadata ( "ndli_relation_breadcrumbs", implode ( "/", $breadcrumbs ) );
+				$this->ndli_relation_breadcrumbs ( "ndli_relation_breadcrumbs", implode ( "/", $breadcrumbs ) );
 			}
 			return true;
 		}
@@ -342,11 +351,8 @@ class NDLIDocument extends NDLIConstraints {
 	}
 
 	// GET ////////////////////////////////////////////////////////////////////////////////////////
-	public function get_src_document_id() {
-		return $this->src_document_id;
-	}
-	public function get_ndli_document_id() {
-		return $this->ndli_document_id;
+	public function get_document_id() {
+		return $this->document_id;
 	}
 	public function get_collection_id() {
 		return $this->collection_id;
@@ -378,6 +384,10 @@ class NDLIDocumentSet {
 	}
 	public function size() {
 		return count ( $this->documents );
+	}
+	public function export_as_json(string $filepath) {
+		// echo " [ " . number_format ( count ( $this->documents ) ) . " items processed ]";
+		// file_put_contents ( $filepath, json_encode ( $this->documents, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) );
 	}
 }
 ?>

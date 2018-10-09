@@ -38,6 +38,13 @@ $FILENAMES = array_reverse($FILENAMES, false);
 
 
 foreach ($FILENAMES as $FILENAME) {
+    
+//     if($FILENAME > "chunk33599.json"){
+//         //print_r($FILENAME);
+//         continue;
+//     }
+    
+    
     print($providerID. "->" .$FILENAME."\n");
     $JSON_DATA = file_get_contents($DATA_DIR.$FILENAME);
 	//print_r($JSON_DATA);
